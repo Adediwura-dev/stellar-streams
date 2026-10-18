@@ -273,8 +273,8 @@ fn test_fee_cap_boundary() {
     // Test 1: fee_bps == 1000 (the 10% cap) withdraws correctly.
     client.initialize(&admin, &treasury, &1000); // 10% fee
     let id = create(&env, &client, &sender, &recipient, &token.id, 10000, 0, 10000, 0);
-    advance_time(&env, 1000);
-    // 10% of 10000 = 1000 to treasury, 9000 to recipient.
+    advance_time(&env, 10000);
+    // Fully vested: 10% of 10000 = 1000 to treasury, 9000 to recipient.
     assert_eq!(client.withdraw(&id), 9000);
     assert_eq!(token.balance(&recipient), 9000);
     assert_eq!(token.balance(&treasury), 1000);
@@ -287,34 +287,36 @@ fn test_fee_cap_boundary() {
     assert_eq!(res, Err(Ok(StreamError::InvalidFee)));
 
     // Test 3: cliff_time == end_time releases everything at end_time.
-    let client3 = register(&env);
-    let (token3, sender3, recipient3, client3_) = setup(&env);
+    // The ledger is at t=10000 here, so these streams start in the future.
+    let (token3, sender3, recipient3, client3) = setup(&env);
     token3.mint(&sender3, 1000);
     let admin3 = account(&env);
     let treasury3 = account(&env);
-    client3_.initialize(&admin3, &treasury3, &100);
-    let id3 = create(&env, &client3_, &sender3, &recipient3, &token3.id, 1000, 0, 1000, 0);
-    // cliff_time == end_time == 1000, so at t=0 nothing is vested, at t=1000 everything is vested.
-    assert_eq!(client3_.claimable(&id3), 0);
-    advance_time(&env, 1000);
-    assert_eq!(client3_.claimable(&id3), 1000);
-    assert_eq!(client3_.withdraw(&id3), 900); // 10% fee
-    assert_eq!(token3.balance(&recipient3), 900);
-    assert_eq!(token3.balance(&treasury3), 100);
+    client3.initialize(&admin3, &treasury3, &100); // 1% fee
+    let id3 = create(&env, &client3, &sender3, &recipient3, &token3.id, 1000, 10000, 11000, 11000);
+    // cliff_time == end_time == 11000, so at t=10000 nothing is vested,
+    // at t=10999 still nothing, and at t=11000 everything is vested.
+    assert_eq!(client3.claimable(&id3), 0);
+    advance_time(&env, 999);
+    assert_eq!(client3.claimable(&id3), 0);
+    advance_time(&env, 1);
+    assert_eq!(client3.claimable(&id3), 1000);
+    assert_eq!(client3.withdraw(&id3), 990); // 1% fee
+    assert_eq!(token3.balance(&recipient3), 990);
+    assert_eq!(token3.balance(&treasury3), 10);
 
     // Test 4: withdrawing the full amount twice returns NothingToWithdraw the second time.
-    let client4 = register(&env);
-    let (token4, sender4, recipient4, client4_) = setup(&env);
+    let (token4, sender4, recipient4, client4) = setup(&env);
     token4.mint(&sender4, 1000);
     let admin4 = account(&env);
     let treasury4 = account(&env);
-    client4_.initialize(&admin4, &treasury4, &100);
-    let id4 = create(&env, &client4_, &sender4, &recipient4, &token4.id, 1000, 0, 1000, 0);
-    advance_time(&env, 1000);
-    // First withdraw: full amount minus fee.
-    assert_eq!(client4_.withdraw(&id4), 900);
+    client4.initialize(&admin4, &treasury4, &100);
+    let id4 = create(&env, &client4, &sender4, &recipient4, &token4.id, 1000, 11000, 12000, 11000);
+    advance_time(&env, 1000); // t = 12000, fully vested
+                              // First withdraw: full amount minus fee.
+    assert_eq!(client4.withdraw(&id4), 990);
     // Second withdraw: nothing left to withdraw.
-    assert!(client4_.try_withdraw(&id4).is_err());
+    assert_eq!(client4.try_withdraw(&id4), Err(Ok(StreamError::NothingToWithdraw)));
 }
 
 #[test]
