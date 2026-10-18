@@ -16,6 +16,7 @@ pub enum EscrowError {
     DeadlineNotReached = 6,
     DeadlineExpired = 7,
     AlreadyFinalized = 8,
+    InvalidDeadline = 9,
 }
 
 #[contracttype]
@@ -106,6 +107,9 @@ pub struct EscrowContract;
 #[contractimpl]
 impl EscrowContract {
     /// Create a new escrow agreement. Initial status is Created (unfunded).
+    ///
+    /// `deadline` must be strictly in the future, i.e. `deadline > now`, or the
+    /// call fails with `EscrowError::InvalidDeadline`.
     pub fn create_escrow(
         env: Env,
         id: u64,
@@ -123,6 +127,13 @@ impl EscrowContract {
 
         if amount <= 0 {
             return Err(EscrowError::InvalidAmount);
+        }
+
+        // A deadline at or before the current ledger time would let the payer
+        // cancel a funded escrow immediately, robbing the payee of the window
+        // the deadline is supposed to guarantee.
+        if deadline <= env.ledger().timestamp() {
+            return Err(EscrowError::InvalidDeadline);
         }
 
         payer.require_auth();
